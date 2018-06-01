@@ -15,9 +15,14 @@
 
 #[macro_use]
 extern crate mysql;
-// ...
+extern crate redis;
+extern crate log;
+// extern crate slog;
+// extern crate slog_term;
 
 use mysql as my;
+use redis::Commands;
+// use slog::DrainExt;
 
 #[derive(Debug, PartialEq, Eq)]
 struct Payment {
@@ -26,13 +31,41 @@ struct Payment {
     account_name: Option<String>,
 }
 
+fn fetch_an_integer() -> redis::RedisResult<isize> {
+    // connect to redis
+    let client = try!(redis::Client::open("redis://127.0.0.1/"));
+    let con = try!(client.get_connection());
+    // throw away the result, just make sure it does not fail
+    let _ : () = try!(con.set("my_key", 42));
+    // read back the key and return it.  Because the return value
+    // from the function is a result for integer this will automatically
+    // convert into one.
+    let ret = con.get("my_key");
+    ret
+}
+
 fn main() {
-    let pool = my::Pool::new("mysql://user:pass@127.0.0.1/cas").unwrap();
+    let user = "user";
+    let addr = "127.0.0.1";
+    let pwd: String = String::from("pass");
+    let port: u16 = 3306;
+    let mut builder = my::OptsBuilder::default();
+    builder.user(Some(user))
+            .pass(Some(pwd))
+            .ip_or_hostname(Some(addr))
+            .tcp_port(port)
+            // .database("cas")
+            .prefer_socket(false);
+    
+    // min 10 and max 100 as defualt
+    // let pool = my::Pool::new("mysql://user:pass@127.0.0.1/cas").unwrap();
+    // let pool = my::Pool::new(builder).unwrap();
+    let pool = my::Pool::new_manual(1, 1, builder).unwrap();
 
     // Let's create payment table.
     // It is temporary so we do not need `tmp` database to exist.
     // Unwap just to make sure no error happened.
-    pool.prep_exec(r"CREATE TEMPORARY TABLE tmp.payment (
+    pool.prep_exec(r"CREATE TEMPORARY TABLE cas.payment (
                          customer_id int not null,
                          amount int not null,
                          account_name text
@@ -49,7 +82,7 @@ fn main() {
     // Let's insert payments to the database
     // We will use into_iter() because we do not need to map Stmt to anything else.
     // Also we assume that no error happened in `prepare`.
-    for mut stmt in pool.prepare(r"INSERT INTO tmp.payment
+    for mut stmt in pool.prepare(r"INSERT INTO cas.payment
                                        (customer_id, amount, account_name)
                                    VALUES
                                        (:customer_id, :amount, :account_name)").into_iter() {
@@ -66,7 +99,7 @@ fn main() {
 
     // Let's select payments from database
     let selected_payments: Vec<Payment> =
-    pool.prep_exec("SELECT customer_id, amount, account_name from tmp.payment", ())
+    pool.prep_exec("SELECT customer_id, amount, account_name from cas.payment", ())
     .map(|result| { // In this closure we will map `QueryResult` to `Vec<Payment>`
         // `QueryResult` is iterator over `MyResult<row, err>` so first call to `map`
         // will map each `MyResult` to contained `row` (no proper error handling)
@@ -86,4 +119,7 @@ fn main() {
     // so assume we are lukky.
     assert_eq!(payments, selected_payments);
     println!("Yay!");
+
+    println!("{}", fetch_an_integer().unwrap());
+    // fetch_an_integer();
 }

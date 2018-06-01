@@ -5,3 +5,6 @@ authors = ["yichen <>"]
 
 [dependencies]
 mysql = "*"
+redis = "*"
+log = "*"
+slog = "*"
